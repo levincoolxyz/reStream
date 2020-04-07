@@ -121,4 +121,4 @@ $ssh_cmd "$read_loop" \
              -video_size "$width,$height" \
              $landscape_param \
              -i - \
-    ; echo "streaming service stopped by user"; kill -15 $(ps -elf | grep "dd if=/dev/fb0" | awk '{print $4}') )
+    ; echo "streaming service stopped by user"; kill -15 $(ps -elf | grep "dd if=/dev/fb0" | grep "root@$ssh_host" | awk '{print $4}') )
