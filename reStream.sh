@@ -90,7 +90,7 @@ compress_only="\$HOME/lz4" # lz4 binary path on reMarkable
 decompress_only="lz4 -d" # lz4 binary command on host
 xor="\$HOME/.bin/xorstream" # xorstream binary path on reMarkable
 tmpfile="/tmp/fb_old" # path where the reference frame buffer is stored
-compress="( $xor $tmpfile $tmpfile | $compress_only )"
+compress="( $xor $tmpfile /dev/null e | $compress_only )"
 
 # calculte how much bytes the window is
 window_bytes="$(($width*$height*$bytes_per_pixel))"
@@ -103,11 +103,11 @@ landscape_param="$($landscape && echo '-vf transpose=1')"
 head_fb0="dd if=/dev/fb0 count=1 bs=$window_bytes 2>/dev/null"
 
 # loop that keeps on reading and compressing, to be executed remotely
-read_loop="while $head_fb0; do :; done | $compress"
+read_loop="while $head_fb0; do sleep 0.05; done | $compress"
 
-# store initial frame buffer and transfer to host
-$ssh_cmd "dd if=/dev/fb0 count=1 bs=$window_bytes of=$tmpfile"
-$ssh_cmd "cat $tmpfile | $compress_only" | $decompress_only > $tmpfile
+# # store initial frame buffer and transfer to host (turns out unnecessary)
+# $ssh_cmd "dd if=/dev/fb0 count=1 bs=$window_bytes of=$tmpfile"
+# $ssh_cmd "cat $tmpfile | $compress_only" | $decompress_only > $tmpfile
 
 set -e # stop if an error occurs
 
@@ -125,7 +125,7 @@ set -e # stop if an error occurs
 
 # adding gui related flares (no need to ctrl-c once ffplay quits) + some ffmpeg flags
 $ssh_cmd "$read_loop" \
-    | $decompress_only | xorstream $tmpfile $tmpfile \
+    | $decompress_only | xorstream $tmpfile /dev/null d \
     | ( ffplay -fflags nobuffer -flags low_delay -framedrop \
              -probesize 32 -sync ext -autoexit \
              -window_title "reMarkable streaming service" \
@@ -136,4 +136,4 @@ $ssh_cmd "$read_loop" \
              -video_size "$width,$height" \
              $landscape_param \
              -i - \
-    ; echo "streaming service stopped."; kill -15 $(ps -elf | grep "dd if=/dev/fb0" | grep "root@$ssh_host" | awk '{print $4}') )
+    ; echo "streaming service stopped."; kill -15 $(ps -elf | grep "while dd if=/dev/fb0" | grep "root@$ssh_host" | awk '{print $4}') )
