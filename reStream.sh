@@ -6,16 +6,24 @@ landscape=false            # rotate window 90 deg cw for landscape view
 output_path=-              # display output through ffplay
 format=-                   # automatic output format
 
-# start gui for options if the system has yad or zenity
+# start gui for options if the system has yad
 if type yad >/dev/null && [ ! $(echo $DISPLAY) == "" ]; then
     output=$(yad --form --title "reMarkable streaming service" \
-                 --field "ssh host" "10.11.99.1" \
+                 --field "ssh source:" "10.11.99.1" \
+                 --align=right \
+                 --field "ouput path:" "-" \
+                 --align=right \
+                 --field "format:" "-" \
+                 --align=right \
                  --field "landscape view":CHK FALSE \
-                 --fixed --timeout=60 --separator " ")
+                 --align=center \
+                 --fixed --timeout=60 --borders=10 --separator " ")
     if (( $? )); then exit 1; fi
     output=(${output})
     ssh_host=${output[0]}
-    landscape=$(echo ${output[1]} | tr '[:upper:]' '[:lower:]')
+    output_path=${output[1]}
+    format=${output[2]}
+    landscape=$(echo ${output[3]} | tr '[:upper:]' '[:lower:]')
 else
 # loop through arguments and process them
 while [ $# -gt 0 ]; do
@@ -44,10 +52,10 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         -h | --help | *)
-            echo "Usage: $0 [-p] [-s <source>] [-o <output>] [-f <format>]"
+            echo "Usage: $0 [-pl] [-s <source>] [-o <output>] [-f <format>]"
             echo "Examples:"
-            echo "  $0                              # live view in landscape"
-            echo "  $0 -p                           # live view in portrait"
+            echo "  $0 -l                           # live view in landscape"
+            echo "  $0 [-p]                         # live view in portrait"
             echo "  $0 -s 192.168.0.10              # connect to different IP"
             echo "  $0 -o reMarkable.mp4            # record to a file"
             echo "  $0 -o udp://dest:1234 -f mpegts # record to a stream"
@@ -117,8 +125,7 @@ tmpfile="/tmp/fb_old" # path where the reference frame buffer is stored
 compress="( $xor $tmpfile /dev/null e | $compress_only )"
 
 # calculte how much bytes the window is
-window_bytes="$(($width*$height*$bytes_per_pixel))"
-# window_bytes=5271552
+window_bytes="$(($width*$height*$bytes_per_pixel))" # 5271552
 
 # rotate 90 degrees if landscape=true
 landscape_param="$($landscape && echo '-vf transpose=1')"
@@ -136,7 +143,8 @@ read_loop="while $head_fb0; do $loop_wait; done | $compress"
 set -- "$@" -vf "${video_filters#,}"
 
 if [ "$output_path" = - ]; then
-    output_cmd=ffplay
+    output_cmd="ffplay -framedrop -sync ext -autoexit \
+    -window_title reMarkable_streaming_service"
 else
     output_cmd=ffmpeg
 
@@ -162,18 +170,17 @@ set -e # stop if an error occurs
 #         -i - \
 #         "$@"
 
-# adding gui related flares (no need to ctrl-c once ffplay quits) + some ffmpeg flags
+# adding gui related flares (no need to ctrl-c once ffplay quits) + some more flags
 ssh_cmd "$read_loop" \
     | $decompress_only | xorstream $tmpfile /dev/null d \
-    | ( ffplay -fflags nobuffer -flags low_delay -framedrop \
-               -probesize 32 -sync ext -autoexit \
-               -window_title "reMarkable streaming service" \
-               -vcodec rawvideo \
-               -loglevel "$loglevel" \
-               -f rawvideo \
-               -pixel_format gray16le \
-               -video_size "$width,$height" \
-               $landscape_param \
-               -i - \
-               "$@" \
-    ; echo "streaming service stopped."; kill -15 $(ps -elf | grep "while dd if=/dev/fb0" | grep "root@$ssh_host" | awk '{print $4}') )
+    | ( $output_cmd \
+        -fflags nobuffer -flags low_delay -probesize 32 \
+        -vcodec rawvideo \
+        -loglevel "$loglevel" \
+        -f rawvideo \
+        -pixel_format gray16le \
+        -video_size "$width,$height" \
+        $landscape_param \
+        -i - \
+        "$@" \
+        ; echo "streaming service stopped."; kill -15 $(ps -elf | grep "while dd if=/dev/fb0" | grep "root@$ssh_host" | awk '{print $4}') )
