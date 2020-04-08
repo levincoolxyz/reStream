@@ -10,10 +10,11 @@ static void usage() {
 	fprintf(stderr, "return result to stdout while saving stdin stream.\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Usage: \n");
-	fprintf(stderr, "xorstream ref_file new_file \n");
+	fprintf(stderr, "xorstream ref_file new_file flag\n");
 	fprintf(stderr, "Where:\n");
 	fprintf(stderr, "    ref_file         the file to be xored\n");
     fprintf(stderr, "    new_file         the file storing stdin\n");
+    fprintf(stderr, "    flag[d]          flag for decoding (one less memcpy)\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "!!!WARNING: Not fool proof only for use with rmStream!!!\n");
 }
@@ -31,7 +32,7 @@ int main(int argc, char *argv[]) {
 	// fprintf(stderr, "argv1 = %s\n", argv[1]);
     // fprintf(stderr, "argv2 = %s\n", argv[2]);
 
-	if (argc != 3) {
+	if (argc != 4) {
     	usage();
         return 1;
 	}
@@ -57,26 +58,29 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, sigINThandle);
 
+    inSize=fread(buf_ref,1,blockSize,fr); // Read ref_file to buf_ref
+    // fprintf(stderr,"ref_file = %lu\n", inSize);
+    assert(inSize <= blockSize);
+    // if (inSize == 0) break;
+
     while (!stop) {
         inSize=fread(buf_in,1,blockSize,stdin); // Read stdin to buf_in
-        // fprintf(stderr,"inSize1 = %lu\n", inSize);
+        // fprintf(stderr,"stdin = %lu\n", inSize);
         assert(inSize <= blockSize);
         if (inSize == 0) break;
-
-        inSize=fread(buf_ref,1,blockSize,fr); // Read ref_file to buf_ref
-        // fprintf(stderr,"inSize2 = %lu\n", inSize);
-        assert(inSize <= blockSize);
-        // if (inSize == 0) break;
 
         for (size_t x=0; x<blockSize; ++x)
             buf_ref[x] = ((char) buf_ref[x] ^ (char) buf_in[x]); // write XOR to buf_ref
 
-        outSize=fwrite(buf_in,1,blockSize,fw); // write buf_in to new_file
-        assert(outSize <= blockSize);
-
         outSize=fwrite(buf_ref,1,blockSize,stdout); // write buf_ref to stdout
         assert(outSize <= blockSize);
+
+        if (strcmp(argv[3],"d"))
+            memcpy(buf_ref,buf_in,blockSize);
     }
+
+    outSize=fwrite(buf_in,1,blockSize,fw); // write buf_in to new_file
+    assert(outSize <= blockSize);
 
     fclose(fr);
     fclose(fw);
