@@ -28,30 +28,30 @@ else
 # loop through arguments and process them
 while [ $# -gt 0 ]; do
     case "$1" in
-        -p|--portrait)
+        -p| --portrait)
             landscape=false
             shift
             ;;
-        -l|--landscape)
+        -l| --landscape)
             landscape=true
             shift
             ;;
-        -s|--source)
+        -s| --source)
             ssh_host="$2"
             shift
             shift
             ;;
-        -o | --output)
+        -o| --output)
             output_path="$2"
             shift
             shift
             ;;
-        -f | --format)
+        -f| --format)
             format="$2"
             shift
             shift
             ;;
-        -h | --help | *)
+        -h| --help | *)
             echo "Usage: $0 [-pl] [-s <source>] [-o <output>] [-f <format>]"
             echo "Examples:"
             echo "  $0 -l                           # live view in landscape"
@@ -137,8 +137,10 @@ head_fb0="dd if=/dev/fb0 count=1 bs=$window_bytes 2>/dev/null"
 read_loop="while $head_fb0; do $loop_wait; done | $compress"
 
 # # store initial frame buffer and transfer to host (useless in 0.05 seconds)
-# ssh_cmd "dd if=/dev/fb0 count=1 bs=$window_bytes of=$tmpfile"
+# ssh_cmd "dd if=/dev/fb0 count=1 bs=$window_bytes of=$tmpfile 2>/dev/null"
 # ssh_cmd "cat $tmpfile | $compress_only" | $decompress_only > $tmpfile
+ssh_cmd "dd if=/dev/zero count=1 bs=$window_bytes of=$tmpfile 2>/dev/null"
+dd if=/dev/zero count=1 bs=$window_bytes of=$tmpfile 2>/dev/null
 
 set -- "$@" -vf "${video_filters#,}"
 
