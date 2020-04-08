@@ -4,7 +4,7 @@
 ssh_host="10.11.99.1"      # remarkable connected trough USB
 landscape=true             # rotate 90 degrees to the right
 
-# start gui if has display
+# start gui for options if the system has yad or zenity
 if type yad >/dev/null && [ ! $(echo $DISPLAY) == "" ]; then
     output=$(yad --form --title "reMarkable streaming service" \
                  --field "ssh host" "10.11.99.1" \
@@ -51,7 +51,7 @@ bytes_per_pixel=2
 loop_wait=true
 # loglevel=info
 loglevel=error
-ssh_cmd="ssh -o ConnectTimeout=2 "root@$ssh_host""
+ssh_cmd="ssh -o ConnectTimeout=1 "root@$ssh_host""
 
 # check if we are able to reach the remarkable
 if ! $ssh_cmd true; then
@@ -69,7 +69,8 @@ fi
 
 # check if lz4 is present on remarkable
 # if $ssh_cmd "[ -f \$HOME/lz4 ]"; then
-    compress="\$HOME/lz4"
+#     compress="\$HOME/lz4"
+#     compress="/opt/bin/zstd --fast=200 -c"
 # fi
 
 # gracefully degrade to gzip if is not present on remarkable or host
@@ -80,8 +81,16 @@ fi
 #     echo "Your host does not have lz4."
 #     fallback_to_gzip
 # else
-    decompress="lz4 -d"
+#     decompress="lz4 -d"
+#     decompress="zstd -d"
 # fi
+
+# xor delta encoding & decoding with lz4 compression
+compress_only="\$HOME/lz4" # lz4 binary path on reMarkable
+decompress_only="lz4 -d" # lz4 binary command on host
+xor="\$HOME/.bin/xorstream" # xorstream binary path on reMarkable
+tmpfile="/tmp/fb_old" # path where the reference frame buffer is stored
+compress="( $xor $tmpfile $tmpfile | $compress_only )"
 
 # calculte how much bytes the window is
 window_bytes="$(($width*$height*$bytes_per_pixel))"
@@ -94,25 +103,31 @@ landscape_param="$($landscape && echo '-vf transpose=1')"
 head_fb0="dd if=/dev/fb0 count=1 bs=$window_bytes 2>/dev/null"
 
 # loop that keeps on reading and compressing, to be executed remotely
-read_loop="while $head_fb0; do $loop_wait; done | $compress"
+read_loop="while $head_fb0; do :; done | $compress"
+
+# store initial frame buffer and transfer to host
+$ssh_cmd "dd if=/dev/fb0 count=1 bs=$window_bytes of=$tmpfile"
+$ssh_cmd "cat $tmpfile | $compress_only" | $decompress_only > $tmpfile
 
 set -e # stop if an error occurs
 
-# shellcheck disable=SC2086
-# $ssh_cmd "$read_loop" \
-#     | $decompress \
-#     | ffplay -vcodec rawvideo \
-#              -loglevel "$loglevel" \
-#              -f rawvideo \
-#              -pixel_format gray16le \
-#              -video_size "$width,$height" \
-#              $landscape_param \
-#              -i -
+# # original solution by rien
+# # shellcheck disable=SC2086
+# # $ssh_cmd "$read_loop" \
+# #     | $decompress \
+# #     | ffplay -vcodec rawvideo \
+# #              -loglevel "$loglevel" \
+# #              -f rawvideo \
+# #              -pixel_format gray16le \
+# #              -video_size "$width,$height" \
+# #              $landscape_param \
+# #              -i -
 
+# adding gui related flares (no need to ctrl-c once ffplay quits) + some ffmpeg flags
 $ssh_cmd "$read_loop" \
-    | $decompress \
+    | $decompress_only | xorstream $tmpfile $tmpfile \
     | ( ffplay -fflags nobuffer -flags low_delay -framedrop \
-             -probesize 32 -sync ext -autoexit\
+             -probesize 32 -sync ext -autoexit \
              -window_title "reMarkable streaming service" \
              -vcodec rawvideo \
              -loglevel "$loglevel" \
@@ -121,4 +136,4 @@ $ssh_cmd "$read_loop" \
              -video_size "$width,$height" \
              $landscape_param \
              -i - \
-    ; echo "streaming service stopped by user"; kill -15 $(ps -elf | grep "dd if=/dev/fb0" | grep "root@$ssh_host" | awk '{print $4}') )
+    ; echo "streaming service stopped."; kill -15 $(ps -elf | grep "dd if=/dev/fb0" | grep "root@$ssh_host" | awk '{print $4}') )
