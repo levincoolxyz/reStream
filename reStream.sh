@@ -69,7 +69,7 @@ fi
 width=1408
 height=1872
 bytes_per_pixel=2
-loop_wait="sleep 0.05"
+loop_wait="sleep 0.03"
 # loglevel="info"
 loglevel="error"
 ssh_cmd() {
