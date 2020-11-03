@@ -69,7 +69,7 @@ fi
 width=1408
 height=1872
 bytes_per_pixel=2
-loop_wait="sleep 0.03"
+loop_wait="sleep 0.02"
 # loglevel="info"
 loglevel="error"
 ssh_cmd() {
@@ -125,18 +125,74 @@ tmpfile="/tmp/fb_old" # path where the reference frame buffer is stored
 compress="( $xor $tmpfile /dev/null e | $compress_only )"
 
 # calculte how much bytes the window is
-window_bytes="$(($width*$height*$bytes_per_pixel))" # 5271552
+# window_bytes="$(($width*$height*$bytes_per_pixel))" # 5271552
 
 # rotate 90 degrees if landscape=true
 landscape_param="$($landscape && echo '-vf transpose=1')"
 
 # read the first $window_bytes of the framebuffer
-head_fb0="dd if=/dev/fb0 count=1 bs=$window_bytes 2>/dev/null"
+# head_fb0="dd if=/dev/fb0 count=1 bs=$window_bytes 2>/dev/null"
+
+
+rm_version="$(ssh_cmd cat /sys/devices/soc0/machine)"
+
+case "$rm_version" in
+    "reMarkable 1.0")
+        width=1408
+        height=1872
+        bytes_per_pixel=2
+        pixel_format="rgb565le"
+        # calculate how much bytes the window is
+        window_bytes="$((width * height * bytes_per_pixel))"
+        # read the first $window_bytes of the framebuffer
+        head_fb0="dd if=/dev/fb0 count=1 bs=$window_bytes 2>/dev/null"
+        ;;
+    "reMarkable 2.0")
+        pixel_format="gray8"
+        width=1872
+        height=1404
+        bytes_per_pixel=1
+
+        # calculate how much bytes the window is
+        window_bytes="$((width * height * bytes_per_pixel))"
+
+        # find xochitl's process
+        pid="$(ssh_cmd pidof xochitl)"
+        echo "xochitl's PID: $pid"
+
+        # find framebuffer location in memory
+        # it is actually the map allocated _after_ the fb0 mmap
+        read_address="grep -C1 '/dev/fb0' /proc/$pid/maps | tail -n1 | sed 's/-.*$//'"
+        skip_bytes_hex="$(ssh_cmd "$read_address")"
+        skip_bytes="$((0x$skip_bytes_hex + 8))"
+        echo "framebuffer is at 0x$skip_bytes_hex"
+
+        # carve the framebuffer out of the process memory
+        page_size=4096
+        window_start_blocks="$((skip_bytes / page_size))"
+        window_offset="$((skip_bytes % page_size))"
+        window_length_blocks="$((window_bytes / page_size + 1))"
+
+        # Using dd with bs=1 is too slow, so we first carve out the pages our desired
+        # bytes are located in, and then we trim the resulting data with what we need.
+        # head_fb0="dd if=/proc/$pid/mem bs=$page_size skip=$window_start_blocks count=$window_length_blocks 2>/dev/null | tail -c+$window_offset | dd bs=$window_bytes 2>/dev/null"
+        head_fb0="dd if=/proc/$pid/mem bs=$page_size skip=$window_start_blocks count=$window_length_blocks 2>/dev/null | tail -c+$window_offset | head -c $window_bytes"
+
+        landscape_param="$($landscape || echo '-vf transpose=2')"
+        ;;
+    *)
+        echo "Unsupported reMarkable version: $rm_version."
+        echo "Please visit https://github.com/rien/reStream/ for updates."
+        exit 1
+        ;;
+esac
+
 
 # loop that keeps on reading and compressing, to be executed remotely
 read_loop="while $head_fb0; do $loop_wait; done | $compress"
+# read_loop="\$HOME/.bin/xorswap /dev/fb0 $tmpfile e | $compress_only" # fread incur more cpu usage than while + dd
 
-# # store initial frame buffer and transfer to host (useless in 0.05 seconds)
+# # store initial frame buffer and transfer to host (useless in 0.02 seconds)
 # ssh_cmd "dd if=/dev/fb0 count=1 bs=$window_bytes of=$tmpfile 2>/dev/null"
 # ssh_cmd "cat $tmpfile | $compress_only" | $decompress_only > $tmpfile
 ssh_cmd "dd if=/dev/zero count=1 bs=$window_bytes of=$tmpfile 2>/dev/null"
@@ -145,6 +201,8 @@ dd if=/dev/zero count=1 bs=$window_bytes of=$tmpfile 2>/dev/null
 set -- "$@" -vf "${video_filters#,}"
 
 if [ "$output_path" = - ]; then
+    # output_cmd="ffplay -framedrop -sync ext -autoexit \
+    # -window_title reMarkable_streaming_service"
     output_cmd="ffplay -framedrop -sync ext -autoexit \
     -window_title reMarkable_streaming_service"
 else
@@ -174,15 +232,15 @@ set -e # stop if an error occurs
 
 # adding gui related flares (no need to ctrl-c once ffplay quits) + some more flags
 ssh_cmd "$read_loop" \
-    | $decompress_only | xorstream $tmpfile /dev/null d \
+    | $decompress_only | ~/.bin/xorstream $tmpfile /dev/null d \
     | ( $output_cmd \
         -fflags nobuffer -flags low_delay -probesize 32 \
         -vcodec rawvideo \
         -loglevel "$loglevel" \
         -f rawvideo \
-        -pixel_format gray16le \
+        -pixel_format "$pixel_format" \
         -video_size "$width,$height" \
         $landscape_param \
         -i - \
         "$@" \
-        ; echo "streaming service stopped."; kill -15 $(ps -elf | grep "while dd if=/dev/fb0" | grep "root@$ssh_host" | awk '{print $4}') )
+        ; echo "streaming service stopped."; kill -15 $(ps -elf | grep "lz4" | grep "root@$ssh_host" | awk '{print $4}') )
