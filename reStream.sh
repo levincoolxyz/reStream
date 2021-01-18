@@ -136,9 +136,18 @@ landscape_param="$($landscape && echo '-vf transpose=1')"
 
 rm_version="$(ssh_cmd cat /sys/devices/soc0/machine)"
 
+if ssh_cmd "[ -f /dev/shm/swtfb.01 ]"; then
+    rm_version="reMarkable 1.0"
+    source="/dev/shm/swtfb.01"
+    width=1404
+else
+    source="dev/fb0"
+    width=1408
+fi
+
 case "$rm_version" in
     "reMarkable 1.0")
-        width=1408
+        # width=1408
         height=1872
         bytes_per_pixel=2
         pixel_format="rgb565le"
