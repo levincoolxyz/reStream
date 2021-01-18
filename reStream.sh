@@ -66,9 +66,9 @@ done
 fi
 
 # technical parameters
-width=1408
-height=1872
-bytes_per_pixel=2
+# width=1408
+# height=1872
+# bytes_per_pixel=2
 loop_wait="sleep 0.02"
 # loglevel="info"
 loglevel="error"
@@ -154,7 +154,7 @@ case "$rm_version" in
         # calculate how much bytes the window is
         window_bytes="$((width * height * bytes_per_pixel))"
         # read the first $window_bytes of the framebuffer
-        head_fb0="dd if=/dev/fb0 count=1 bs=$window_bytes 2>/dev/null"
+        head_fb0="dd if=$source count=1 bs=$window_bytes 2>/dev/null"
         ;;
     "reMarkable 2.0")
         pixel_format="gray8"
